@@ -1,0 +1,96 @@
+<!DOCTYPE html>
+<html lang="pl">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Proste Narzędzie CAD</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
+    <link rel="stylesheet" href="css/style.css">
+</head>
+<body class="bg-gray-100 text-gray-800 flex flex-col h-screen">
+
+    <!-- Nagłówek -->
+    <header class="bg-white shadow-md p-4 z-10">
+        <h1 class="text-xl font-bold text-gray-700">Przeglądarkowe Narzędzie CAD</h1>
+    </header>
+
+    <!-- Główna treść -->
+    <div class="flex flex-grow overflow-hidden">
+        <!-- Panel narzędzi -->
+        <aside class="w-64 bg-white p-4 shadow-lg flex flex-col space-y-4">
+            <div>
+                <h2 class="text-lg font-semibold mb-2">Edycja</h2>
+                <div class="grid grid-cols-2 gap-2 text-sm">
+                    <button id="undo-btn" class="tool-btn p-2 border rounded-md hover:bg-blue-100 transition">Cofnij</button>
+                    <button id="redo-btn" class="tool-btn p-2 border rounded-md hover:bg-blue-100 transition">Ponów</button>
+                </div>
+            </div>
+            <div>
+                <h2 class="text-lg font-semibold mb-2">Narzędzia</h2>
+                <div class="grid grid-cols-2 gap-2 text-sm">
+                    <button id="select-tool" class="tool-btn p-2 border rounded-md hover:bg-blue-100 transition">Zaznacz (S)</button>
+                    <button id="line-tool" class="tool-btn p-2 border rounded-md hover:bg-blue-100 transition">Linia (L)</button>
+                    <button id="rect-tool" class="tool-btn p-2 border rounded-md hover:bg-blue-100 transition">Prostokąt (R)</button>
+                    <button id="circle-tool" class="tool-btn p-2 border rounded-md hover:bg-blue-100 transition">Koło (C)</button>
+                    <button id="dim-tool" class="tool-btn p-2 border rounded-md hover:bg-blue-100 transition">Wymiar (D)</button>
+                    <button id="fillet-tool" class="tool-btn p-2 border rounded-md hover:bg-blue-100 transition">Zaokrąglij (F)</button>
+                    <button id="chamfer-tool" class="tool-btn p-2 border rounded-md hover:bg-blue-100 transition">Sfazuj (H)</button>
+                </div>
+            </div>
+            
+            <div>
+                <h2 class="text-lg font-semibold mb-2">Wymiary / Parametry</h2>
+                <div class="space-y-2">
+                    <div>
+                        <label id="label-length" for="input-length" class="text-sm">Wartość:</label>
+                        <input type="number" id="input-length" class="w-full p-1 border rounded-md" placeholder="auto">
+                    </div>
+                    <div>
+                        <label for="input-width" class="text-sm">Szerokość:</label>
+                        <input type="number" id="input-width" class="w-full p-1 border rounded-md" placeholder="auto">
+                    </div>
+                </div>
+            </div>
+
+             <div>
+                <h2 class="text-lg font-semibold mb-2">Przyciąganie (Snap)</h2>
+                <div class="space-y-2">
+                    <label class="flex items-center space-x-2">
+                        <input type="checkbox" id="snap-endpoint" class="rounded" checked>
+                        <span>Koniec</span>
+                    </label>
+                    <label class="flex items-center space-x-2">
+                        <input type="checkbox" id="snap-midpoint" class="rounded" checked>
+                        <span>Środek</span>
+                    </label>
+                </div>
+            </div>
+            
+            <div class="flex-grow"></div>
+            <button id="export-svg" class="w-full bg-green-500 text-white p-2 rounded-md hover:bg-green-600 transition mb-2">Eksportuj SVG</button>
+            <button id="delete-button" class="w-full bg-yellow-500 text-white p-2 rounded-md hover:bg-yellow-600 transition mb-2" disabled>Usuń zaznaczone</button>
+            <button id="clear-canvas" class="w-full bg-red-500 text-white p-2 rounded-md hover:bg-red-600 transition">Wyczyść wszystko</button>
+        </aside>
+
+        <!-- Obszar roboczy -->
+        <main class="flex-grow p-4 flex flex-col">
+            <div id="canvas-container" class="relative w-full h-full bg-white rounded-lg shadow-inner">
+                <canvas id="cad-canvas"></canvas>
+                <div id="coords" class="absolute bottom-2 right-2 bg-gray-800 text-white text-xs px-2 py-1 rounded">0, 0</div>
+            </div>
+        </main>
+    </div>
+
+    <!-- Skrypty modułów CAD -->
+    <script src="js/state.js"></script>
+    <script src="js/ui.js"></script>
+    <script src="js/drawing.js"></script>
+    <script src="js/selection.js"></script>
+    <script src="js/snapping.js"></script>
+    <script src="js/modification.js"></script>
+    <script src="js/history.js"></script>
+    <script src="js/events.js"></script>
+    <script src="js/app.js"></script>
+</body>
+</html> 
