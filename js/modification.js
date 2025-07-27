@@ -23,7 +23,7 @@ CADApp.modification = {
                         { x: rect.x, y: rect.y + rect.h }
                     ];
                 },
-                applyModification: function(target, value, type) {
+                applyModification: function(target, value, type, addDimension = true) {
                     let { shape, vertexIndex } = target;
 
                     // Konwersja prostokąta na polygon
@@ -91,8 +91,10 @@ CADApp.modification = {
                         };
                         points.splice(vertexIndex, 1, filletPoint);
                         
-                        // Automatycznie dodaj wymiar promienia filleta
-                        this.createFilletDimension(shape, filletPoint, actualRadius);
+                        // Automatycznie dodaj wymiar promienia filleta, jesli wymagane
+                        if (addDimension) {
+                            this.createFilletDimension(shape, filletPoint, actualRadius);
+                        }
                     }
                 },
                 

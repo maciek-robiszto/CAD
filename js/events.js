@@ -215,7 +215,7 @@ CADApp.events = {
                         const tempShapeCopy = JSON.parse(JSON.stringify(shape));
                         const tempTarget = { shape: tempShapeCopy, vertexIndex };
                         const modType = (state.currentTool === 'fillet' && !state.isShiftPressed) || (state.currentTool === 'chamfer' && state.isShiftPressed) ? 'fillet' : 'chamfer';
-                        modification.applyModification(tempTarget, value, modType);
+                        modification.applyModification(tempTarget, value, modType, false);
                         state.tempShape = tempShapeCopy;
                         drawing.draw();
 
@@ -278,7 +278,7 @@ CADApp.events = {
                         const value = parseFloat(CADApp.ui.lengthInput.value);
                         if (!isNaN(value) && value > 0) {
                             const modType = (state.currentTool === 'fillet' && !state.isShiftPressed) || (state.currentTool === 'chamfer' && state.isShiftPressed) ? 'fillet' : 'chamfer';
-                            modification.applyModification(state.modificationTarget, value, modType);
+                            modification.applyModification(state.modificationTarget, value, modType, true);
                             historyManager.saveState();
                         }
                         events.cancelCurrentCommand();
