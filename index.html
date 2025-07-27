@@ -1,0 +1,1223 @@
+<!DOCTYPE html>
+<html lang="pl">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Proste Narzędzie CAD</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
+    <style>
+        body {
+            font-family: 'Inter', sans-serif;
+            overflow: hidden;
+        }
+        #cad-canvas {
+            background-color: #f0f4f8;
+            border-radius: 0.5rem;
+        }
+        .tool-btn.active {
+            background-color: #3b82f6;
+            color: white;
+            border-color: #3b82f6;
+        }
+        input:disabled, button:disabled {
+            background-color: #e5e7eb;
+            cursor: not-allowed;
+            opacity: 0.7;
+        }
+    </style>
+</head>
+<body class="bg-gray-100 text-gray-800 flex flex-col h-screen">
+
+    <!-- Nagłówek -->
+    <header class="bg-white shadow-md p-4 z-10">
+        <h1 class="text-xl font-bold text-gray-700">Przeglądarkowe Narzędzie CAD</h1>
+    </header>
+
+    <!-- Główna treść -->
+    <div class="flex flex-grow overflow-hidden">
+        <!-- Panel narzędzi -->
+        <aside class="w-64 bg-white p-4 shadow-lg flex flex-col space-y-4">
+            <div>
+                <h2 class="text-lg font-semibold mb-2">Edycja</h2>
+                <div class="grid grid-cols-2 gap-2 text-sm">
+                    <button id="undo-btn" class="tool-btn p-2 border rounded-md hover:bg-blue-100 transition">Cofnij</button>
+                    <button id="redo-btn" class="tool-btn p-2 border rounded-md hover:bg-blue-100 transition">Ponów</button>
+                </div>
+            </div>
+            <div>
+                <h2 class="text-lg font-semibold mb-2">Narzędzia</h2>
+                <div class="grid grid-cols-2 gap-2 text-sm">
+                    <button id="select-tool" class="tool-btn p-2 border rounded-md hover:bg-blue-100 transition">Zaznacz (S)</button>
+                    <button id="line-tool" class="tool-btn p-2 border rounded-md hover:bg-blue-100 transition">Linia (L)</button>
+                    <button id="rect-tool" class="tool-btn p-2 border rounded-md hover:bg-blue-100 transition">Prostokąt (R)</button>
+                    <button id="circle-tool" class="tool-btn p-2 border rounded-md hover:bg-blue-100 transition">Koło (C)</button>
+                    <button id="dim-tool" class="tool-btn p-2 border rounded-md hover:bg-blue-100 transition">Wymiar (D)</button>
+                    <button id="fillet-tool" class="tool-btn p-2 border rounded-md hover:bg-blue-100 transition">Zaokrąglij (F)</button>
+                    <button id="chamfer-tool" class="tool-btn p-2 border rounded-md hover:bg-blue-100 transition">Sfazuj (H)</button>
+                </div>
+            </div>
+            
+            <div>
+                <h2 class="text-lg font-semibold mb-2">Wymiary / Parametry</h2>
+                <div class="space-y-2">
+                    <div>
+                        <label id="label-length" for="input-length" class="text-sm">Wartość:</label>
+                        <input type="number" id="input-length" class="w-full p-1 border rounded-md" placeholder="auto">
+                    </div>
+                    <div>
+                        <label for="input-width" class="text-sm">Szerokość:</label>
+                        <input type="number" id="input-width" class="w-full p-1 border rounded-md" placeholder="auto">
+                    </div>
+                </div>
+            </div>
+
+             <div>
+                <h2 class="text-lg font-semibold mb-2">Przyciąganie (Snap)</h2>
+                <div class="space-y-2">
+                    <label class="flex items-center space-x-2">
+                        <input type="checkbox" id="snap-endpoint" class="rounded" checked>
+                        <span>Koniec</span>
+                    </label>
+                    <label class="flex items-center space-x-2">
+                        <input type="checkbox" id="snap-midpoint" class="rounded" checked>
+                        <span>Środek</span>
+                    </label>
+                </div>
+            </div>
+            
+            <div class="flex-grow"></div>
+            <button id="export-svg" class="w-full bg-green-500 text-white p-2 rounded-md hover:bg-green-600 transition mb-2">Eksportuj SVG</button>
+            <button id="delete-button" class="w-full bg-yellow-500 text-white p-2 rounded-md hover:bg-yellow-600 transition mb-2" disabled>Usuń zaznaczone</button>
+            <button id="clear-canvas" class="w-full bg-red-500 text-white p-2 rounded-md hover:bg-red-600 transition">Wyczyść wszystko</button>
+        </aside>
+
+        <!-- Obszar roboczy -->
+        <main class="flex-grow p-4 flex flex-col">
+            <div id="canvas-container" class="relative w-full h-full bg-white rounded-lg shadow-inner">
+                <canvas id="cad-canvas"></canvas>
+                <div id="coords" class="absolute bottom-2 right-2 bg-gray-800 text-white text-xs px-2 py-1 rounded">0, 0</div>
+            </div>
+        </main>
+    </div>
+
+    <script>
+        const CADApp = {
+            // --- Stan aplikacji ---
+            state: {
+                currentTool: 'select',
+                activeCommand: null,
+                firstPoint: null,
+                currentPolylinePoints: [],
+                currentPolylineSegmentIds: [],
+                isDragging: false,
+                modificationTarget: null, 
+                dimensionTarget: null, 
+                startX: 0, startY: 0,
+                mouseX: 0, mouseY: 0,
+                shapes: [],
+                tempShape: null,
+                selectedShape: null,
+                snapTolerance: 10,
+                shapeIdCounter: 1,
+                isShiftPressed: false,
+                history: [[]],
+                historyIndex: 0,
+                lastClickTime: 0,
+                lastClickShape: null,
+                editingDimension: null,
+            },
+
+            // --- Elementy UI ---
+            ui: {
+                canvas: null, ctx: null, canvasContainer: null, coordsDisplay: null,
+                lengthInput: null, widthInput: null, lengthLabel: null,
+                snapEndpoint: null, snapMidpoint: null, deleteButton: null,
+                undoBtn: null, redoBtn: null,
+
+                init: function() {
+                    Object.assign(this, {
+                        canvas: document.getElementById('cad-canvas'),
+                        ctx: document.getElementById('cad-canvas').getContext('2d'),
+                        canvasContainer: document.getElementById('canvas-container'),
+                        coordsDisplay: document.getElementById('coords'),
+                        lengthInput: document.getElementById('input-length'),
+                        widthInput: document.getElementById('input-width'),
+                        lengthLabel: document.getElementById('label-length'),
+                        snapEndpoint: document.getElementById('snap-endpoint'),
+                        snapMidpoint: document.getElementById('snap-midpoint'),
+                        deleteButton: document.getElementById('delete-button'),
+                        undoBtn: document.getElementById('undo-btn'),
+                        redoBtn: document.getElementById('redo-btn'),
+                    });
+                },
+
+                setActiveTool: function(tool) {
+                    CADApp.state.currentTool = tool;
+                    CADApp.state.selectedShape = null;
+                    CADApp.events.cancelCurrentCommand();
+                    document.querySelectorAll('.tool-btn').forEach(btn => btn.classList.remove('active'));
+                    document.getElementById(`${tool}-tool`).classList.add('active');
+                    
+                    const isRect = tool === 'rect';
+                    const isDrawingTool = tool === 'line' || tool === 'rect' || tool === 'circle';
+                    this.lengthInput.disabled = !isDrawingTool && tool !== 'fillet' && tool !== 'chamfer';
+                    this.widthInput.disabled = !isRect;
+                    if(tool === 'circle') this.lengthLabel.textContent = 'Promień:';
+                    else if(tool === 'fillet' || tool === 'chamfer') this.lengthLabel.textContent = 'Wartość:';
+                    else this.lengthLabel.textContent = 'Długość:';
+                    
+                    this.updateCursor();
+                    this.updateDeleteButtonState();
+                    CADApp.drawing.draw();
+                },
+                
+                updateCursor: function() {
+                    const { currentTool, mouseX, mouseY, selectedShape, activeCommand, isShiftPressed } = CADApp.state;
+                    const { selection, modification } = CADApp;
+                    if (activeCommand) {
+                        this.canvas.style.cursor = 'crosshair';
+                    } else if (currentTool === 'select') {
+                        const hoverShape = selection.findShapeAtPoint(mouseX, mouseY);
+                        if (selectedShape && hoverShape === selectedShape) this.canvas.style.cursor = 'move';
+                        else if (isShiftPressed && hoverShape && hoverShape.type === 'line') this.canvas.style.cursor = 'copy';
+                        else this.canvas.style.cursor = 'default';
+                    } else if (currentTool === 'dim' && selection.findEdgeAtPoint(mouseX, mouseY)) {
+                         this.canvas.style.cursor = 'copy';
+                    } else if ((currentTool === 'fillet' || currentTool === 'chamfer') && modification.findVertexAtPoint(mouseX, mouseY)) {
+                        this.canvas.style.cursor = 'pointer';
+                    }
+                    else {
+                        this.canvas.style.cursor = 'default';
+                    }
+                },
+
+                updateDeleteButtonState: function() { this.deleteButton.disabled = !CADApp.state.selectedShape; },
+                updateHistoryButtons: function() {
+                    const { history, historyIndex } = CADApp.state;
+                    this.undoBtn.disabled = historyIndex <= 0;
+                    this.redoBtn.disabled = historyIndex >= history.length - 1;
+                },
+                clearCanvas: function() { Object.assign(CADApp.state, { shapes: [], tempShape: null, selectedShape: null, activeCommand: null, firstPoint: null, currentPolylinePoints: [], isDragging: false, shapeIdCounter: 1 }); this.updateDeleteButtonState(); CADApp.historyManager.saveState(); },
+                resizeCanvas: function() { this.canvas.width = this.canvasContainer.clientWidth; this.canvas.height = this.canvasContainer.clientHeight; CADApp.drawing.draw(); },
+                exportSVG: function() {
+                    const { shapes } = CADApp.state;
+                    const { canvas } = CADApp.ui;
+                    let svgContent = `<svg width="${canvas.width}" height="${canvas.height}" xmlns="http://www.w3.org/2000/svg">\n`;
+                    svgContent += `  <rect width="100%" height="100%" fill="#f0f4f8" />\n`;
+
+                    shapes.forEach(shape => {
+                        if (shape.type === 'line') {
+                            svgContent += `  <line x1="${shape.x1}" y1="${shape.y1}" x2="${shape.x2}" y2="${shape.y2}" stroke="#0f172a" stroke-width="2" />\n`;
+                        } else if (shape.type === 'rect') {
+                            svgContent += `  <rect x="${shape.x}" y="${shape.y}" width="${shape.w}" height="${shape.h}" stroke="#0f172a" stroke-width="2" fill="rgba(59, 130, 246, 0.05)" />\n`;
+                        } else if (shape.type === 'circle') {
+                            svgContent += `  <circle cx="${shape.cx}" cy="${shape.cy}" r="${shape.r}" stroke="#0f172a" stroke-width="2" fill="rgba(59, 130, 246, 0.05)" />\n`;
+                        } else if (shape.type === 'polygon') {
+                            // Prostsze podejście dla polygonu - sprawdź czy ma fillety
+                            const hasFillets = shape.points.some(p => p.isFillet);
+                            
+                            if (hasFillets) {
+                                // Użyj ścieżki SVG dla filletów - zgodny z nowym algorytmem Canvas
+                                let pathData = '';
+                                const points = shape.points;
+                                
+                                if (points.length > 0) {
+                                    // Znajdź pierwszy punkt do rozpoczęcia
+                                    let startPoint;
+                                    if (points[0].isFillet && points[0].p2) {
+                                        startPoint = points[0].p2;
+                                    } else {
+                                        startPoint = points[0];
+                                    }
+                                    
+                                    pathData += `M ${startPoint.x} ${startPoint.y} `;
+                                    
+                                    // Rysuj wszystkie segmenty
+                                    for (let i = 0; i < points.length; i++) {
+                                        const nextIndex = (i + 1) % points.length;
+                                        const nextPoint = points[nextIndex];
+                                        
+                                        if (nextPoint.isFillet && nextPoint.p1 && nextPoint.p2 && nextPoint.radius > 0) {
+                                            // Następny punkt ma fillet
+                                            pathData += `L ${nextPoint.p1.x} ${nextPoint.p1.y} `;
+                                            // Użyj Q dla łuku kwadratowego (aproksymacja arcTo)
+                                            pathData += `Q ${nextPoint.x} ${nextPoint.y} ${nextPoint.p2.x} ${nextPoint.p2.y} `;
+                                        } else {
+                                            // Następny punkt jest zwykły
+                                            pathData += `L ${nextPoint.x} ${nextPoint.y} `;
+                                        }
+                                    }
+                                    
+                                    pathData += 'Z';
+                                    svgContent += `  <path d="${pathData}" stroke="#0f172a" stroke-width="2" fill="rgba(59, 130, 246, 0.05)" />\n`;
+                                }
+                            } else {
+                                // Zwykły polygon bez filletów
+                                const points = shape.points.map(p => `${p.x},${p.y}`).join(' ');
+                                svgContent += `  <polygon points="${points}" stroke="#0f172a" stroke-width="2" fill="rgba(59, 130, 246, 0.05)" />\n`;
+                            }
+                        }
+                    });
+
+                    svgContent += '</svg>';
+
+                    const blob = new Blob([svgContent], { type: 'image/svg+xml;charset=utf-8' });
+                    const url = URL.createObjectURL(blob);
+                    const a = document.createElement('a');
+                    a.href = url;
+                    a.download = 'rysunek.svg';
+                    document.body.appendChild(a);
+                    a.click();
+                    document.body.removeChild(a);
+                    URL.revokeObjectURL(url);
+                }
+            },
+            
+            // --- Logika Zaznaczania, Przesuwania i Usuwania ---
+            selection: {
+                findShapeAtPoint: function(x, y, types = ['line', 'rect', 'circle', 'dimension', 'polygon']) {
+                    for (let i = CADApp.state.shapes.length - 1; i >= 0; i--) {
+                        const shape = CADApp.state.shapes[i];
+                        if (types.includes(shape.type) && this.isPointOnShape(x, y, shape)) return shape;
+                    }
+                    return null;
+                },
+                findEdgeAtPoint: function(x, y) {
+                    const { shapes } = CADApp.state;
+                    for (const shape of shapes) {
+                        let edges = [];
+                        if (shape.type === 'rect') {
+                            const v = CADApp.modification.getRectVertices(shape);
+                            edges = [{p1: v[0], p2: v[1]}, {p1: v[1], p2: v[2]}, {p1: v[2], p2: v[3]}, {p1: v[3], p2: v[0]}];
+                        } else if (shape.type === 'polygon') {
+                            for (let i = 0; i < shape.points.length; i++) {
+                                const currentPoint = shape.points[i];
+                                const nextPoint = shape.points[(i + 1) % shape.points.length];
+                                
+                                let p1, p2;
+                                
+                                // Określ punkt początkowy krawędzi
+                                if (currentPoint.isFillet && currentPoint.p2) {
+                                    p1 = currentPoint.p2;
+                                } else {
+                                    p1 = currentPoint;
+                                }
+                                
+                                // Określ punkt końcowy krawędzi
+                                if (nextPoint.isFillet && nextPoint.p1) {
+                                    p2 = nextPoint.p1;
+                                } else {
+                                    p2 = nextPoint;
+                                }
+                                
+                                // Dodaj krawędź tylko jeśli punkty są różne
+                                if (Math.hypot(p2.x - p1.x, p2.y - p1.y) > 1) {
+                                    edges.push({p1: p1, p2: p2});
+                                }
+                            }
+                        } else if (shape.type === 'line') {
+                            edges.push({p1: {x: shape.x1, y: shape.y1}, p2: {x: shape.x2, y: shape.y2}});
+                        } else if (shape.type === 'circle') {
+                             if (this.isPointOnShape(x, y, shape)) return { shape, edge: null };
+                        }
+
+                        for (let i = 0; i < edges.length; i++) {
+                            const edge = edges[i];
+                            if (this.isPointOnShape(x, y, {type: 'line', x1: edge.p1.x, y1: edge.p1.y, x2: edge.p2.x, y2: edge.p2.y})) {
+                                return { shape, edge: {...edge, index: i} };
+                            }
+                        }
+                    }
+                    return null;
+                },
+                isPointOnShape: function(x, y, shape) {
+                    const tolerance = 5;
+                    if (shape.type === 'line') {
+                        const { x1, y1, x2, y2 } = shape;
+                        const distSq = (x2 - x1) ** 2 + (y2 - y1) ** 2;
+                        if (distSq === 0) return Math.hypot(x - x1, y - y1) <= tolerance;
+                        let t = ((x - x1) * (x2 - x1) + (y - y1) * (y2 - y1)) / distSq;
+                        t = Math.max(0, Math.min(1, t));
+                        const projX = x1 + t * (x2 - x1);
+                        const projY = y1 + t * (y2 - y1);
+                        return Math.hypot(x - projX, y - projY) <= tolerance;
+                    } else if (shape.type === 'rect') {
+                        return (x >= shape.x && x <= shape.x + shape.w && y >= shape.y && y <= shape.y + shape.h);
+                    } else if (shape.type === 'circle') {
+                        const dist = Math.hypot(x - shape.cx, y - shape.cy);
+                        return Math.abs(dist - shape.r) <= tolerance;
+                    } else if (shape.type === 'dimension') {
+                        return x > Math.min(shape.p1x, shape.p2x) - tolerance && x < Math.max(shape.p1x, shape.p2x) + tolerance &&
+                               y > Math.min(shape.p1y, shape.p2y) - tolerance && y < Math.max(shape.p1y, shape.p2y) + tolerance;
+                    } else if (shape.type === 'polygon') {
+                        for (let i = 0; i < shape.points.length; i++) {
+                            const currentPoint = shape.points[i];
+                            const nextPoint = shape.points[(i + 1) % shape.points.length];
+                            
+                            // Sprawdź kliknięcie na łuku fillet
+                            if (currentPoint.isFillet && currentPoint.radius) {
+                                const dist = Math.hypot(x - currentPoint.x, y - currentPoint.y);
+                                if (Math.abs(dist - currentPoint.radius) <= tolerance) {
+                                    return true;
+                                }
+                            }
+                            
+                            // Sprawdź kliknięcie na krawędzi
+                            let p1, p2;
+                            if (currentPoint.isFillet && currentPoint.p2) {
+                                p1 = currentPoint.p2;
+                            } else {
+                                p1 = currentPoint;
+                            }
+                            
+                            if (nextPoint.isFillet && nextPoint.p1) {
+                                p2 = nextPoint.p1;
+                            } else {
+                                p2 = nextPoint;
+                            }
+                            
+                            // Sprawdź kliknięcie na linii między punktami
+                            if (Math.hypot(p2.x - p1.x, p2.y - p1.y) > 1) {
+                                if (this.isPointOnShape(x, y, { type: 'line', x1: p1.x, y1: p1.y, x2: p2.x, y2: p2.y })) {
+                                    return true;
+                                }
+                            }
+                        }
+                        return false;
+                    }
+                    return false;
+                },
+                moveShape: function(shape, dx, dy) {
+                    if (shape.type === 'line') {
+                        shape.x1 += dx; shape.y1 += dy; shape.x2 += dx; shape.y2 += dy;
+                    } else if (shape.type === 'rect') {
+                        shape.x += dx; shape.y += dy;
+                    } else if (shape.type === 'circle') {
+                        shape.cx += dx; shape.cy += dy;
+                    } else if (shape.type === 'polygon') {
+                        shape.points.forEach(p => { 
+                            p.x += dx; p.y += dy; 
+                            if(p.isFillet) {
+                                p.p1.x += dx; p.p1.y += dy;
+                                p.p2.x += dx; p.p2.y += dy;
+                            }
+                        });
+                    } 
+                    // Update all associated dimensions
+                    CADApp.state.shapes.forEach(s => { 
+                        if (s.type === 'dimension' && s.targetId === shape.id) {
+                            CADApp.drawing.updateDimensionGeometry(s); 
+                        }
+                    });
+                },
+                deleteSelectedShape: function() {
+                    const { state, ui, drawing, historyManager } = CADApp;
+                    if (!state.selectedShape) return;
+                    const shapeToDelete = state.selectedShape;
+                    state.shapes = state.shapes.filter(s => s !== shapeToDelete);
+                    if (shapeToDelete.id) {
+                        state.shapes = state.shapes.filter(s => !(s.type === 'dimension' && s.targetId === shapeToDelete.id));
+                    }
+                    state.selectedShape = null;
+                    ui.updateDeleteButtonState();
+                    drawing.draw();
+                    historyManager.saveState();
+                },
+                
+                editDimension: function(dimension) {
+                    const currentValue = parseFloat(dimension.text);
+                    const newValue = prompt(`Wprowadź nowy wymiar (obecny: ${currentValue}):`, currentValue);
+                    
+                    if (newValue === null || newValue === '' || isNaN(parseFloat(newValue))) {
+                        return; // Anulowano lub nieprawidłowa wartość
+                    }
+                    
+                    const targetShape = CADApp.state.shapes.find(s => s.id === dimension.targetId);
+                    if (!targetShape) return;
+                    
+                    const ratio = parseFloat(newValue) / currentValue;
+                    
+                    // Skaluj obiekt w zależności od typu
+                    if (targetShape.type === 'line') {
+                        this.scaleLine(targetShape, ratio, dimension);
+                    } else if (targetShape.type === 'rect') {
+                        this.scaleRect(targetShape, ratio, dimension);
+                    } else if (targetShape.type === 'circle') {
+                        this.scaleCircle(targetShape, ratio);
+                    } else if (targetShape.type === 'polygon') {
+                        this.scalePolygon(targetShape, ratio, dimension);
+                    }
+                    
+                    // Aktualizuj wszystkie wymiary dla tego obiektu
+                    CADApp.state.shapes.forEach(s => {
+                        if (s.type === 'dimension' && s.targetId === targetShape.id) {
+                            CADApp.drawing.updateDimensionGeometry(s);
+                        }
+                    });
+                    
+                    CADApp.drawing.draw();
+                    CADApp.historyManager.saveState();
+                },
+                
+                scaleLine: function(line, ratio, dimension) {
+                    const length = Math.hypot(line.x2 - line.x1, line.y2 - line.y1);
+                    const newLength = length * ratio;
+                    const angle = Math.atan2(line.y2 - line.y1, line.x2 - line.x1);
+                    
+                    line.x2 = line.x1 + newLength * Math.cos(angle);
+                    line.y2 = line.y1 + newLength * Math.sin(angle);
+                },
+                
+                scaleRect: function(rect, ratio, dimension) {
+                    if (dimension.dimType === 'horizontal') {
+                        rect.w *= ratio;
+                    } else if (dimension.dimType === 'vertical') {
+                        rect.h *= ratio;
+                    } else {
+                        // Proporcjonalne skalowanie
+                        rect.w *= ratio;
+                        rect.h *= ratio;
+                    }
+                },
+                
+                scaleCircle: function(circle, ratio) {
+                    circle.r *= ratio;
+                },
+                
+                scalePolygon: function(polygon, ratio, dimension) {
+                    // Znajdź środek polygonu
+                    const centroid = this.getPolygonCentroid(polygon);
+                    
+                    // Skaluj wszystkie punkty względem środka
+                    polygon.points.forEach(point => {
+                        if (point.isFillet) {
+                            // Skaluj punkty fillet
+                            point.x = centroid.x + (point.x - centroid.x) * ratio;
+                            point.y = centroid.y + (point.y - centroid.y) * ratio;
+                            point.p1.x = centroid.x + (point.p1.x - centroid.x) * ratio;
+                            point.p1.y = centroid.y + (point.p1.y - centroid.y) * ratio;
+                            point.p2.x = centroid.x + (point.p2.x - centroid.x) * ratio;
+                            point.p2.y = centroid.y + (point.p2.y - centroid.y) * ratio;
+                            point.radius *= ratio;
+                        } else {
+                            point.x = centroid.x + (point.x - centroid.x) * ratio;
+                            point.y = centroid.y + (point.y - centroid.y) * ratio;
+                        }
+                    });
+                },
+                
+                getPolygonCentroid: function(polygon) {
+                    let x = 0, y = 0;
+                    polygon.points.forEach(point => {
+                        x += point.x;
+                        y += point.y;
+                    });
+                    return { x: x / polygon.points.length, y: y / polygon.points.length };
+                }
+            },
+
+            // --- Logika rysowania ---
+            drawing: {
+                draw: function() {
+                    const { ctx, canvas } = CADApp.ui;
+                    const { shapes, tempShape, selectedShape, trimSegment } = CADApp.state;
+                    ctx.clearRect(0, 0, canvas.width, canvas.height);
+                    this.drawGrid();
+                    shapes.forEach(shape => {
+                        const isSelected = (shape === selectedShape);
+                        if (shape.type === 'line' || shape.type === 'rect' || shape.type === 'circle' || shape.type === 'polygon') {
+                            // Ukryj tylko kształty geometryczne które są aktualnie modyfikowane
+                            if (tempShape && tempShape.id === shape.id && 
+                                (tempShape.type === 'line' || tempShape.type === 'rect' || tempShape.type === 'circle' || tempShape.type === 'polygon')) {
+                                return;
+                            }
+                            
+                            ctx.strokeStyle = isSelected ? '#3b82f6' : '#0f172a';
+                            ctx.lineWidth = isSelected ? 3 : 2;
+                            if (shape.type === 'line') this.drawLine(shape);
+                            else if (shape.type === 'rect') this.drawRect(shape);
+                            else if (shape.type === 'circle') this.drawCircle(shape);
+                            else if (shape.type === 'polygon') this.drawPolygon(shape);
+                        } else if (shape.type === 'dimension') {
+                            // Wymiary zawsze rysuj - nigdy nie ukrywaj
+                            this.drawDimensionObject(shape, isSelected);
+                        }
+                    });
+                    if (tempShape) {
+                        ctx.strokeStyle = '#3b82f6'; ctx.lineWidth = 1.5; ctx.setLineDash([5, 5]);
+                        if (tempShape.type === 'dimension') {
+                            this.drawDimensionObject(tempShape, true);
+                        } else if (tempShape.type === 'line') {
+                            this.drawLine(tempShape); this.drawLineLiveDimensions(tempShape.x1, tempShape.y1, tempShape.x2, tempShape.y2);
+                        } else if (tempShape.type === 'rect') {
+                            this.drawRect(tempShape);
+                        } else if (tempShape.type === 'circle') {
+                            this.drawCircle(tempShape);
+                        } else if (tempShape.type === 'polygon') {
+                            this.drawPolygon(tempShape);
+                        }
+                        ctx.setLineDash([]);
+                    }
+                    if(trimSegment) {
+                        ctx.strokeStyle = '#ef4444';
+                        ctx.lineWidth = 3;
+                        ctx.beginPath();
+                        ctx.moveTo(trimSegment.x1, trimSegment.y1);
+                        ctx.lineTo(trimSegment.x2, trimSegment.y2);
+                        ctx.stroke();
+                    }
+                },
+                drawLine: function(shape) { const { ctx } = CADApp.ui; ctx.beginPath(); ctx.moveTo(shape.x1, shape.y1); ctx.lineTo(shape.x2, shape.y2); ctx.stroke(); },
+                drawRect: function(shape) {
+                    const { ctx } = CADApp.ui;
+                    ctx.fillStyle = 'rgba(59, 130, 246, 0.05)';
+                    ctx.fillRect(shape.x, shape.y, shape.w, shape.h);
+                    ctx.strokeRect(shape.x, shape.y, shape.w, shape.h);
+                },
+                drawCircle: function(shape) { 
+                    const { ctx } = CADApp.ui; 
+                    ctx.beginPath(); 
+                    ctx.arc(shape.cx, shape.cy, shape.r, 0, 2 * Math.PI); 
+                    ctx.fillStyle = 'rgba(59, 130, 246, 0.05)';
+                    ctx.fill();
+                    ctx.stroke();
+                },
+                drawPolygon: function(shape) {
+                    const { ctx } = CADApp.ui;
+                    const { points } = shape;
+                    if (points.length < 3) return;
+
+                    ctx.beginPath();
+                    
+                    // Znajdź pierwszy punkt do rozpoczęcia (pierwszy punkt bez fillet lub p2 pierwszego fillet)
+                    let startPoint;
+                    if (points[0].isFillet && points[0].p2) {
+                        startPoint = points[0].p2;
+                    } else {
+                        startPoint = points[0];
+                    }
+                    
+                    ctx.moveTo(startPoint.x, startPoint.y);
+
+                    // Rysuj wszystkie segmenty
+                    for (let i = 0; i < points.length; i++) {
+                        const currentPoint = points[i];
+                        const nextIndex = (i + 1) % points.length;
+                        const nextPoint = points[nextIndex];
+                        
+                        if (nextPoint.isFillet && nextPoint.p1 && nextPoint.p2 && nextPoint.radius > 0) {
+                            // Następny punkt ma fillet - rysuj linię do punktu początkowego fillet
+                            ctx.lineTo(nextPoint.p1.x, nextPoint.p1.y);
+                            // Rysuj łuk fillet używając arcTo (prostsze i bardziej niezawodne)
+                            ctx.arcTo(nextPoint.x, nextPoint.y, nextPoint.p2.x, nextPoint.p2.y, nextPoint.radius);
+                        } else {
+                            // Następny punkt jest zwykły - rysuj linię do niego
+                            ctx.lineTo(nextPoint.x, nextPoint.y);
+                        }
+                    }
+
+                    ctx.closePath();
+                    ctx.fillStyle = 'rgba(59, 130, 246, 0.05)';
+                    ctx.fill();
+                    ctx.stroke();
+                },
+                drawGrid: function() { const { ctx, canvas } = CADApp.ui; const gridSize = 20; ctx.strokeStyle = '#d1d5db'; ctx.lineWidth = 0.5; for (let x = 0; x < canvas.width; x += gridSize) { ctx.beginPath(); ctx.moveTo(x, 0); ctx.lineTo(x, canvas.height); ctx.stroke(); } for (let y = 0; y < canvas.height; y += gridSize) { ctx.beginPath(); ctx.moveTo(0, y); ctx.lineTo(canvas.width, y); ctx.stroke(); }},
+                drawLineLiveDimensions: function(x1, y1, x2, y2) { const { ctx } = CADApp.ui; const dx = x2 - x1, dy = y2 - y1; if (Math.abs(dx) < 2 && Math.abs(dy) < 2) return; const length = Math.hypot(dx, dy); const midX = x1 + dx / 2, midY = y1 + dy / 2; const angle = Math.atan2(dy, dx); ctx.save(); ctx.translate(midX, midY); ctx.rotate(angle); const textOffset = (angle > 0 && angle < Math.PI) ? -15 : 25; ctx.textAlign = 'center'; ctx.font = 'bold 12px Inter'; ctx.fillStyle = '#1e293b'; ctx.textBaseline = 'bottom'; ctx.fillText(`L: ${length.toFixed(1)}`, 0, textOffset); ctx.font = '11px Inter'; ctx.fillStyle = '#4b5563'; ctx.textBaseline = 'top'; ctx.fillText(`(ΔX: ${dx.toFixed(1)}, ΔY: ${(-dy).toFixed(1)})`, 0, textOffset); ctx.restore(); },
+                drawArrow: function(ctx, x1, y1, x2, y2) { 
+                    const headlen = 8;
+                    const angle = Math.atan2(y2 - y1, x2 - x1);
+                    
+                    ctx.beginPath();
+                    // Linia główna
+                    ctx.moveTo(x1, y1);
+                    ctx.lineTo(x2, y2);
+                    
+                    // Strzałka na końcu (x2, y2)
+                    ctx.moveTo(x2, y2);
+                    ctx.lineTo(x2 - headlen * Math.cos(angle - Math.PI / 6), y2 - headlen * Math.sin(angle - Math.PI / 6));
+                    ctx.moveTo(x2, y2);
+                    ctx.lineTo(x2 - headlen * Math.cos(angle + Math.PI / 6), y2 - headlen * Math.sin(angle + Math.PI / 6));
+                    
+                    // Strzałka na początku (x1, y1) - odwrócona
+                    ctx.moveTo(x1, y1);
+                    ctx.lineTo(x1 + headlen * Math.cos(angle - Math.PI / 6), y1 + headlen * Math.sin(angle - Math.PI / 6));
+                    ctx.moveTo(x1, y1);
+                    ctx.lineTo(x1 + headlen * Math.cos(angle + Math.PI / 6), y1 + headlen * Math.sin(angle + Math.PI / 6));
+                    
+                    ctx.stroke();
+                },
+                updateDimensionGeometry(dim) {
+                    const targetShape = CADApp.state.shapes.find(s => s.id === dim.targetId);
+                    if (!targetShape) return;
+
+                    let line;
+                    if (targetShape.type === 'line') {
+                        line = { p1: {x: targetShape.x1, y: targetShape.y1}, p2: {x: targetShape.x2, y: targetShape.y2} };
+                    } else if (targetShape.type === 'rect') {
+                        const v = CADApp.modification.getRectVertices(targetShape);
+                        line = { p1: v[dim.edgeIndex], p2: v[(dim.edgeIndex + 1) % 4] };
+                    } else if (targetShape.type === 'polygon') {
+                        const points = targetShape.points;
+                        line = { p1: points[dim.edgeIndex], p2: points[(dim.edgeIndex + 1) % points.length] };
+                    } else if (targetShape.type === 'circle') {
+                        const { cx, cy, r } = targetShape;
+                        const angle = dim.offset;
+                        dim.extP1x = cx; dim.extP1y = cy;
+                        dim.extP2x = cx + r * Math.cos(angle); dim.extP2y = cy + r * Math.sin(angle);
+                        dim.p1x = dim.extP1x; dim.p1y = dim.extP1y;
+                        dim.p2x = dim.extP2x; dim.p2y = dim.extP2y;
+                        dim.text = `R ${r.toFixed(1)}`;
+                    }
+                    
+                    if(line) {
+                        const { p1, p2 } = line;
+                        const { dimType, offset } = dim;
+                        if (dimType === 'horizontal') {
+                            dim.p1x = p1.x; dim.p2x = p2.x; dim.p1y = dim.p2y = offset;
+                            dim.extP1x = p1.x; dim.extP1y = p1.y; dim.extP2x = p2.x; dim.extP2y = p2.y;
+                            dim.text = `${Math.abs(p1.x - p2.x).toFixed(1)}`;
+                        } else if (dimType === 'vertical') {
+                            dim.p1y = p1.y; dim.p2y = p2.y; dim.p1x = dim.p2x = offset;
+                            dim.extP1x = p1.x; dim.extP1y = p1.y; dim.extP2x = p2.x; dim.extP2y = p2.y;
+                            dim.text = `${Math.abs(p1.y - p2.y).toFixed(1)}`;
+                        } else { // Aligned
+                            const lineVec = { x: p2.x - p1.x, y: p2.y - p1.y };
+                            const lineLength = Math.hypot(lineVec.x, lineVec.y);
+                            if (lineLength > 1) {
+                                const perpVecNormalized = { x: -lineVec.y / lineLength, y: lineVec.x / lineLength };
+                                const offsetX = perpVecNormalized.x * offset;
+                                const offsetY = perpVecNormalized.y * offset;
+                                dim.p1x = p1.x + offsetX; dim.p1y = p1.y + offsetY;
+                                dim.p2x = p2.x + offsetX; dim.p2y = p2.y + offsetY;
+                            }
+                            dim.extP1x = p1.x; dim.extP1y = p1.y;
+                            dim.extP2x = p2.x; dim.extP2y = p2.y;
+                            dim.text = `${lineLength.toFixed(1)}`;
+                        }
+                    }
+                    
+                    dim.textX = dim.p1x + (dim.p2x - dim.p1x) / 2;
+                    dim.textY = dim.p1y + (dim.p2y - dim.p1y) / 2;
+                },
+                drawDimensionObject: function(dim, isSelected) {
+                    const { ctx } = CADApp.ui;
+                    ctx.strokeStyle = isSelected ? '#3b82f6' : '#0f172a';
+                    ctx.lineWidth = 1;
+                    ctx.fillStyle = '#0f172a';
+                    ctx.font = '12px Inter';
+
+                    // Dimension line
+                    if (dim.p1x !== undefined && dim.p1y !== undefined && dim.p2x !== undefined && dim.p2y !== undefined) {
+                        this.drawArrow(ctx, dim.p1x, dim.p1y, dim.p2x, dim.p2y);
+                    }
+
+                    // Extension lines
+                    if (dim.extP1x !== undefined && dim.dimType !== 'radius') {
+                        ctx.beginPath();
+                        ctx.moveTo(dim.extP1x, dim.extP1y);
+                        ctx.lineTo(dim.p1x, dim.p1y);
+                        ctx.moveTo(dim.extP2x, dim.extP2y);
+                        ctx.lineTo(dim.p2x, dim.p2y);
+                        ctx.stroke();
+                    }
+
+                    // Text
+                    if (dim.textX !== undefined && dim.text) {
+                        ctx.fillText(dim.text, dim.textX, dim.textY - 5);
+                    }
+                }
+            },
+
+            // --- Logika przyciągania ---
+            snapping: {
+                getSnapPoint: function(x, y) { let bestSnap = { x, y, dist: Infinity, isSnapped: false, snapType: null }; const { snapTolerance, shapes, activeCommand, currentPolylinePoints } = CADApp.state; const { snapEndpoint, snapMidpoint } = CADApp.ui; if (!snapEndpoint.checked && !snapMidpoint.checked) return bestSnap; 
+                    if (activeCommand === 'drawing_line' && currentPolylinePoints.length > 1) {
+                        const firstPoint = currentPolylinePoints[0];
+                        const d = Math.hypot(x - firstPoint.x, y - firstPoint.y);
+                        if (d < snapTolerance) {
+                             bestSnap = { x: firstPoint.x, y: firstPoint.y, dist: d, isSnapped: true, snapType: 'endpoint' };
+                        }
+                    }
+                    shapes.forEach(shape => { if (shape.type !== 'line' && shape.type !== 'rect' && shape.type !== 'circle' && shape.type !== 'polygon') return; const points = []; if (shape.type === 'line') { if (snapEndpoint.checked) { points.push({ x: shape.x1, y: shape.y1, type: 'endpoint' }, { x: shape.x2, y: shape.y2, type: 'endpoint' }); } if (snapMidpoint.checked) { points.push({ x: (shape.x1 + shape.x2) / 2, y: (shape.y1 + shape.y2) / 2, type: 'midpoint' }); } } else if (shape.type === 'rect') { if (snapEndpoint.checked) { const pts = CADApp.modification.getRectVertices(shape); pts.forEach(p => points.push({...p, type: 'endpoint'})); } } else if (shape.type === 'circle') { if (snapMidpoint.checked) { points.push({x: shape.cx, y: shape.cy, type: 'midpoint'}); } } else if (shape.type === 'polygon') { 
+                        if (snapEndpoint.checked) { 
+                            shape.points.forEach(p => {
+                                if (p.isFillet) {
+                                    // Dla punktów fillet dodaj punkty styczne
+                                    if (p.p1) points.push({x: p.p1.x, y: p.p1.y, type: 'endpoint'});
+                                    if (p.p2) points.push({x: p.p2.x, y: p.p2.y, type: 'endpoint'});
+                                } else {
+                                    points.push({x: p.x, y: p.y, type: 'endpoint'});
+                                }
+                            });
+                        }
+                        if (snapMidpoint.checked) {
+                            shape.points.forEach(p => {
+                                if (p.isFillet) {
+                                    // Środek łuku fillet
+                                    points.push({x: p.x, y: p.y, type: 'midpoint'});
+                                }
+                            });
+                        }
+                    } points.forEach(p => { const d = Math.hypot(x - p.x, y - p.y); if (d < snapTolerance && d < bestSnap.dist) { bestSnap = { x: p.x, y: p.y, dist: d, isSnapped: true, snapType: p.type }; } }); }); return bestSnap; },
+                drawSnapIndicator: function(x, y, type) { const { ctx } = CADApp.ui; ctx.fillStyle = '#ec4899'; ctx.strokeStyle = '#ffffff'; ctx.lineWidth = 2; ctx.beginPath(); if (type === 'endpoint') ctx.rect(x - 5, y - 5, 10, 10); else if (type === 'midpoint') { ctx.moveTo(x, y - 6); ctx.lineTo(x + 6, y + 3); ctx.lineTo(x - 6, y + 3); ctx.closePath(); } ctx.fill(); ctx.stroke(); }
+            },
+             // --- Logika Modyfikacji (Fillet/Chamfer) ---
+            modification: {
+                findVertexAtPoint: function(x, y) {
+                    const { shapes, snapTolerance } = CADApp.state;
+                    for (const shape of shapes) {
+                        if (shape.type === 'polygon' || shape.type === 'rect') {
+                            const vertices = (shape.type === 'rect') ? this.getRectVertices(shape) : shape.points;
+                            for (let i = 0; i < vertices.length; i++) {
+                                const v = vertices[i];
+                                if (Math.hypot(x - v.x, y - v.y) < snapTolerance) {
+                                    return { shape, vertexIndex: i };
+                                }
+                            }
+                        }
+                    }
+                    return null;
+                },
+                getRectVertices: function(rect) {
+                    return [
+                        { x: rect.x, y: rect.y },
+                        { x: rect.x + rect.w, y: rect.y },
+                        { x: rect.x + rect.w, y: rect.y + rect.h },
+                        { x: rect.x, y: rect.y + rect.h }
+                    ];
+                },
+                applyModification: function(target, value, type) {
+                    let { shape, vertexIndex } = target;
+
+                    // Konwersja prostokąta na polygon
+                    if (shape.type === 'rect') {
+                        const newPolygon = { type: 'polygon', id: shape.id, points: this.getRectVertices(shape) };
+                        CADApp.state.shapes[CADApp.state.shapes.indexOf(shape)] = newPolygon;
+                        shape = newPolygon;
+                    }
+
+                    const points = shape.points;
+                    const len = points.length;
+                    const pPrev = points[(vertexIndex - 1 + len) % len];
+                    const pCurr = points[vertexIndex];
+                    const pNext = points[(vertexIndex + 1) % len];
+
+                    // wektory do poprzedniego i następnego wierzchołka
+                    const v1 = { x: pPrev.x - pCurr.x, y: pPrev.y - pCurr.y };
+                    const v2 = { x: pNext.x - pCurr.x, y: pNext.y - pCurr.y };
+
+                    const len1 = Math.hypot(v1.x, v1.y);
+                    const len2 = Math.hypot(v2.x, v2.y);
+
+                    // Oblicz kąt między wektorami
+                    const dir1 = { x: v1.x / len1, y: v1.y / len1 };
+                    const dir2 = { x: v2.x / len2, y: v2.y / len2 };
+                    const dotProduct = dir1.x * dir2.x + dir1.y * dir2.y;
+                    const angle = Math.acos(Math.max(-1, Math.min(1, dotProduct)));
+                    
+                    // Dla małych kątów fillet nie ma sensu
+                    if (angle < 0.1) return;
+                    
+                    // Oblicz odległość punktów stycznych od wierzchołka dla arcTo()
+                    const tangentDistance = value / Math.tan(angle / 2);
+                    
+                    // Ogranicz odległość żeby nie wyjść poza krawędzie
+                    const maxDist = Math.min(tangentDistance, len1 / 2, len2 / 2);
+                    
+                    if (maxDist < 0.1 || isNaN(maxDist)) return;
+
+                    // Wyznacz punkty styczne łuku
+                    const newP1 = {
+                        x: pCurr.x + (v1.x / len1) * maxDist,
+                        y: pCurr.y + (v1.y / len1) * maxDist
+                    };
+                    const newP2 = {
+                        x: pCurr.x + (v2.x / len2) * maxDist,
+                        y: pCurr.y + (v2.y / len2) * maxDist
+                    };
+
+                    if (type === 'chamfer') {
+                        // Zamiana wierzchołka na dwa punkty (ścięcie)
+                        points.splice(vertexIndex, 1, newP1, newP2);
+                    } else if (type === 'fillet') {
+                        // Oblicz rzeczywisty promień dla arcTo() na podstawie odległości stycznych
+                        const actualRadius = maxDist * Math.tan(angle / 2);
+                        
+                        // Dla arcTo() potrzebujemy oryginalnego wierzchołka jako punktu kontrolnego
+                        const filletPoint = {
+                            x: pCurr.x,
+                            y: pCurr.y,
+                            isFillet: true,
+                            radius: actualRadius,
+                            p1: newP1,
+                            p2: newP2
+                        };
+                        points.splice(vertexIndex, 1, filletPoint);
+                        
+                        // Automatycznie dodaj wymiar promienia filleta
+                        this.createFilletDimension(shape, filletPoint, actualRadius);
+                    }
+                },
+                
+                createFilletDimension: function(shape, filletPoint, radius) {
+                    // Utwórz wymiar promienia dla filleta
+                    const dimension = {
+                        type: 'dimension',
+                        id: CADApp.state.shapeIdCounter++,
+                        targetId: shape.id,
+                        dimType: 'radius',
+                        offset: 0, // Kąt dla promienia
+                        text: `R ${radius.toFixed(1)}`,
+                        // Pozycje będą obliczone przez updateDimensionGeometry
+                        p1x: filletPoint.x,
+                        p1y: filletPoint.y,
+                        p2x: filletPoint.x + radius,
+                        p2y: filletPoint.y,
+                        extP1x: filletPoint.x,
+                        extP1y: filletPoint.y,
+                        extP2x: filletPoint.x + radius,
+                        extP2y: filletPoint.y,
+                        textX: filletPoint.x + radius / 2,
+                        textY: filletPoint.y - 10,
+                        filletPoint: filletPoint // Referencja do punktu fillet
+                    };
+                    
+                    CADApp.state.shapes.push(dimension);
+                }
+            },
+            // --- Historia (Undo/Redo) ---
+            historyManager: {
+                saveState: function() {
+                    const { state } = CADApp;
+                    state.history.length = state.historyIndex + 1; // Trim redo stack
+                    state.history.push(JSON.parse(JSON.stringify(state.shapes)));
+                    state.historyIndex++;
+                    CADApp.ui.updateHistoryButtons();
+                },
+                undo: function() {
+                    const { state } = CADApp;
+                    if (state.historyIndex > 0) {
+                        state.historyIndex--;
+                        state.shapes = JSON.parse(JSON.stringify(state.history[state.historyIndex]));
+                        CADApp.drawing.draw();
+                        CADApp.ui.updateHistoryButtons();
+                    }
+                },
+                redo: function() {
+                    const { state } = CADApp;
+                    if (state.historyIndex < state.history.length - 1) {
+                        state.historyIndex++;
+                        state.shapes = JSON.parse(JSON.stringify(state.history[state.historyIndex]));
+                        CADApp.drawing.draw();
+                        CADApp.ui.updateHistoryButtons();
+                    }
+                }
+            },
+
+            // --- Obsługa zdarzeń ---
+            events: {
+                setup: function() {
+                    const { canvas, deleteButton, undoBtn, redoBtn } = CADApp.ui;
+                    window.addEventListener('resize', () => CADApp.ui.resizeCanvas());
+                    window.addEventListener('keydown', this.handleKeyDown);
+                    window.addEventListener('keyup', this.handleKeyUp);
+                    canvas.addEventListener('mousedown', this.handleMouseDown);
+                    canvas.addEventListener('mousemove', this.handleMouseMove);
+                    canvas.addEventListener('mouseup', this.handleMouseUp);
+                    
+                    document.getElementById('select-tool').addEventListener('click', () => CADApp.ui.setActiveTool('select'));
+                    document.getElementById('line-tool').addEventListener('click', () => CADApp.ui.setActiveTool('line'));
+                    document.getElementById('rect-tool').addEventListener('click', () => CADApp.ui.setActiveTool('rect'));
+                    document.getElementById('circle-tool').addEventListener('click', () => CADApp.ui.setActiveTool('circle'));
+                    document.getElementById('dim-tool').addEventListener('click', () => CADApp.ui.setActiveTool('dim'));
+                    document.getElementById('fillet-tool').addEventListener('click', () => CADApp.ui.setActiveTool('fillet'));
+                    document.getElementById('chamfer-tool').addEventListener('click', () => CADApp.ui.setActiveTool('chamfer'));
+                    document.getElementById('clear-canvas').addEventListener('click', () => CADApp.ui.clearCanvas());
+                    deleteButton.addEventListener('click', () => CADApp.selection.deleteSelectedShape());
+                    document.getElementById('export-svg').addEventListener('click', () => CADApp.ui.exportSVG());
+                    undoBtn.addEventListener('click', () => CADApp.historyManager.undo());
+                    redoBtn.addEventListener('click', () => CADApp.historyManager.redo());
+                },
+
+                cancelCurrentCommand: function() {
+                    CADApp.state.activeCommand = null;
+                    CADApp.state.firstPoint = null;
+                    CADApp.state.tempShape = null;
+                    CADApp.state.currentPolylinePoints = [];
+                    CADApp.state.currentPolylineSegmentIds = [];
+                    CADApp.state.modificationTarget = null;
+                    CADApp.drawing.draw();
+                },
+
+                handleKeyDown: function(e) {
+                    if (document.activeElement.tagName === 'INPUT') return;
+                    const { state, ui, historyManager } = CADApp;
+                    if (e.key === 'Shift') state.isShiftPressed = true;
+                    
+                    if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 'z') {
+                        e.preventDefault();
+                        historyManager.undo();
+                        return;
+                    }
+                    if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 'y') {
+                        e.preventDefault();
+                        historyManager.redo();
+                        return;
+                    }
+
+                    switch(e.key.toLowerCase()) {
+                        case 'l': ui.setActiveTool('line'); break;
+                        case 'r': ui.setActiveTool('rect'); break;
+                        case 'c': ui.setActiveTool('circle'); break;
+                        case 'd': ui.setActiveTool('dim'); break;
+                        case 's': ui.setActiveTool('select'); break;
+                        case 'f': ui.setActiveTool('fillet'); break;
+                        case 'h': ui.setActiveTool('chamfer'); break;
+                        case 'escape': 
+                            if (state.activeCommand) {
+                                CADApp.events.cancelCurrentCommand();
+                            } else if (state.selectedShape) {
+                                state.selectedShape = null;
+                                ui.updateDeleteButtonState();
+                                CADApp.drawing.draw();
+                            }
+                            break;
+                        case 'delete':
+                        case 'backspace':
+                            if (state.selectedShape) { e.preventDefault(); CADApp.selection.deleteSelectedShape(); }
+                            break;
+                    }
+                    ui.updateCursor();
+                },
+
+                handleKeyUp: function(e) {
+                    if (e.key === 'Shift') {
+                        CADApp.state.isShiftPressed = false;
+                        CADApp.ui.updateCursor();
+                    }
+                },
+
+                handleMouseDown: function(e) {
+                    if (e.button !== 0) return;
+
+                    const { state, selection, snapping, ui, drawing, events, modification } = CADApp;
+                    const rect = ui.canvas.getBoundingClientRect();
+                    const mouseX = e.clientX - rect.left;
+                    const mouseY = e.clientY - rect.top;
+                    const snappedPoint = snapping.getSnapPoint(mouseX, mouseY);
+                    
+                    if (state.activeCommand) {
+                        const p1 = state.firstPoint;
+                        const p2 = snappedPoint;
+                        
+                        if (state.activeCommand === 'drawing_line') {
+                            const startPoint = state.currentPolylinePoints[0];
+                            if (state.currentPolylinePoints.length > 1 && Math.hypot(p2.x - startPoint.x, p2.y - startPoint.y) < state.snapTolerance) {
+                                state.shapes = state.shapes.filter(s => !state.currentPolylineSegmentIds.includes(s.id));
+                                // Czyść punkty żeby miały tylko x i y
+                                const cleanPoints = state.currentPolylinePoints.map(p => ({ x: p.x, y: p.y }));
+                                const newPolygon = { type: 'polygon', id: state.shapeIdCounter++, points: cleanPoints };
+                                state.shapes.push(newPolygon);
+                                events.cancelCurrentCommand();
+                                CADApp.historyManager.saveState();
+                            } else {
+                                const newLine = { type: 'line', id: state.shapeIdCounter++, x1: p1.x, y1: p1.y, x2: p2.x, y2: p2.y };
+                                state.shapes.push(newLine);
+                                state.currentPolylineSegmentIds.push(newLine.id);
+                                state.firstPoint = { x: p2.x, y: p2.y }; // Czyść punkt
+                                state.currentPolylinePoints.push({ x: p2.x, y: p2.y }); // Czyść punkt
+                                state.tempShape = null;
+                            }
+                        } else { 
+                            let newShape = null;
+                            if (state.activeCommand === 'drawing_rect') {
+                                newShape = { type: 'rect', id: state.shapeIdCounter++, x: p1.x, y: p1.y, w: p2.x - p1.x, h: p2.y - p1.y };
+                                if (newShape.w < 0) { newShape.x += newShape.w; newShape.w *= -1; }
+                                if (newShape.h < 0) { newShape.y += newShape.h; newShape.h *= -1; }
+                            } else if (state.activeCommand === 'drawing_circle') {
+                                const r = Math.hypot(p2.x - p1.x, p2.y - p1.y);
+                                newShape = { type: 'circle', id: state.shapeIdCounter++, cx: p1.x, cy: p1.y, r: r };
+                            } else if (state.activeCommand === 'dimensioning') {
+                                if (state.tempShape) state.shapes.push(state.tempShape);
+                            }
+                            if (newShape) state.shapes.push(newShape);
+                            events.cancelCurrentCommand();
+                            CADApp.historyManager.saveState();
+                        }
+                    } else { 
+                        state.startX = mouseX;
+                        state.startY = mouseY;
+                        
+                        if (state.currentTool === 'select') {
+                            const targetShape = selection.findShapeAtPoint(mouseX, mouseY);
+                            
+                            // Sprawdź podwójne kliknięcie na wymiar
+                            if (targetShape && targetShape.type === 'dimension') {
+                                const currentTime = Date.now();
+                                const isDoubleClick = currentTime - state.lastClickTime < 300 && state.lastClickShape === targetShape;
+                                
+                                if (isDoubleClick) {
+                                    // Podwójne kliknięcie - edytuj wymiar
+                                    selection.editDimension(targetShape);
+                                    state.lastClickTime = 0; // Reset czasu
+                                    state.lastClickShape = null;
+                                    return;
+                                } else {
+                                    // Pierwsze kliknięcie
+                                    state.lastClickTime = currentTime;
+                                    state.lastClickShape = targetShape;
+                                    state.selectedShape = targetShape;
+                                }
+                            } else if (state.isShiftPressed && targetShape && targetShape.type === 'line') {
+                                state.activeCommand = 'dimensioning';
+                                state.firstPoint = {x: mouseX, y: mouseY};
+                                state.dimensionTarget = {shape: targetShape, edge: {p1: {x: targetShape.x1, y: targetShape.y1}, p2: {x: targetShape.x2, y: targetShape.y2}}};
+                            } else {
+                                state.selectedShape = targetShape;
+                                if (targetShape) state.isDragging = true;
+                                // Reset podwójnego kliknięcia dla innych obiektów
+                                state.lastClickTime = 0;
+                                state.lastClickShape = null;
+                            }
+                        } else if (state.currentTool === 'dim') {
+                             const target = selection.findEdgeAtPoint(mouseX, mouseY);
+                             if (target) {
+                                state.activeCommand = 'dimensioning';
+                                state.firstPoint = {x: mouseX, y: mouseY};
+                                state.dimensionTarget = target;
+                             }
+                        } else if (state.currentTool === 'fillet' || state.currentTool === 'chamfer') {
+                            const targetVertex = modification.findVertexAtPoint(mouseX, mouseY);
+                            if (targetVertex) {
+                                state.activeCommand = 'modifying';
+                                state.modificationTarget = targetVertex;
+                            }
+                        }
+                        else { // Drawing tools
+                            state.activeCommand = 'drawing_' + state.currentTool;
+                            state.firstPoint = { x: snappedPoint.x, y: snappedPoint.y }; // Czyść punkt
+                            if (state.currentTool === 'line') {
+                                state.currentPolylinePoints.push({ x: snappedPoint.x, y: snappedPoint.y }); // Czyść punkt
+                                state.currentPolylineSegmentIds = [];
+                            }
+                        }
+                    }
+                    
+                    ui.updateDeleteButtonState();
+                    drawing.draw();
+                },
+
+                handleMouseMove: function(e) {
+                    const { state, ui, drawing, snapping, modification } = CADApp;
+                    const rect = ui.canvas.getBoundingClientRect();
+                    state.mouseX = e.clientX - rect.left;
+                    state.mouseY = e.clientY - rect.top;
+                    ui.coordsDisplay.textContent = `${Math.round(state.mouseX)}, ${Math.round(state.mouseY)}`;
+                    
+                    if (state.isDragging && state.selectedShape) {
+                        const dx = state.mouseX - state.startX;
+                        const dy = state.mouseY - state.startY;
+                        CADApp.selection.moveShape(state.selectedShape, dx, dy);
+                        state.startX = state.mouseX;
+                        state.startY = state.mouseY;
+                        drawing.draw();
+                    } else if (state.activeCommand === 'modifying') {
+                        const { shape, vertexIndex } = state.modificationTarget;
+                        const vertices = (shape.type === 'rect') ? modification.getRectVertices(shape) : shape.points;
+                        const vertex = vertices[vertexIndex];
+                        const value = Math.hypot(state.mouseX - vertex.x, state.mouseY - vertex.y);
+                        ui.lengthInput.value = value.toFixed(1);
+                        
+                        const tempShapeCopy = JSON.parse(JSON.stringify(shape));
+                        const tempTarget = { shape: tempShapeCopy, vertexIndex };
+                        const modType = (state.currentTool === 'fillet' && !state.isShiftPressed) || (state.currentTool === 'chamfer' && state.isShiftPressed) ? 'fillet' : 'chamfer';
+                        modification.applyModification(tempTarget, value, modType);
+                        state.tempShape = tempShapeCopy;
+                        drawing.draw();
+
+                    } else if (state.activeCommand) {
+                        const p1 = state.firstPoint;
+                        const p2 = snapping.getSnapPoint(state.mouseX, state.mouseY);
+
+                        if (state.activeCommand === 'drawing_line') {
+                            state.tempShape = { type: 'line', x1: p1.x, y1: p1.y, x2: p2.x, y2: p2.y };
+                        } else if (state.activeCommand === 'drawing_rect') {
+                            state.tempShape = { type: 'rect', x: p1.x, y: p1.y, w: p2.x - p1.x, h: p2.y - p1.y };
+                        } else if (state.activeCommand === 'drawing_circle') {
+                            const r = Math.hypot(p2.x - p1.x, p2.y - p1.y);
+                            state.tempShape = { type: 'circle', cx: p1.x, cy: p1.y, r: r };
+                        } else if (state.activeCommand === 'dimensioning') {
+                            const target = state.dimensionTarget;
+                            let text, offset, dimType = 'aligned';
+
+                            if (target.shape.type === 'circle') {
+                                dimType = 'radius';
+                                offset = Math.atan2(state.mouseY - target.shape.cy, state.mouseX - target.shape.cx);
+                                text = `R ${target.shape.r.toFixed(1)}`;
+                            } else {
+                                const line = target.edge;
+                                const dragVec = { x: state.mouseX - p1.x, y: state.mouseY - p1.y };
+                                if (Math.abs(dragVec.y) > Math.abs(dragVec.x) * 2) dimType = 'horizontal';
+                                else if (Math.abs(dragVec.x) > Math.abs(dragVec.y) * 2) dimType = 'vertical';
+
+                                if (dimType === 'horizontal') {
+                                    offset = state.mouseY; text = `${Math.abs(line.p1.x - line.p2.x).toFixed(1)}`;
+                                } else if (dimType === 'vertical') {
+                                    offset = state.mouseX; text = `${Math.abs(line.p1.y - line.p2.y).toFixed(1)}`;
+                                } else {
+                                    const lineVec = { x: line.p2.x - line.p1.x, y: line.p2.y - line.p1.y };
+                                    const lineLength = Math.hypot(lineVec.x, lineVec.y);
+                                    const mouseVec = { x: state.mouseX - line.p1.x, y: state.mouseY - line.p1.y };
+                                    const perpVecNormalized = { x: -lineVec.y / lineLength, y: lineVec.x / lineLength };
+                                    offset = mouseVec.x * perpVecNormalized.x + mouseVec.y * perpVecNormalized.y;
+                                    text = `${lineLength.toFixed(1)}`;
+                                }
+                            }
+                            state.tempShape = { type: 'dimension', targetId: target.shape.id, edgeIndex: target.edge ? target.edge.index : null, dimType, offset, text };
+                            drawing.updateDimensionGeometry(state.tempShape);
+                        }
+                        drawing.draw();
+                    } else {
+                        ui.updateCursor();
+                        const snappedPoint = snapping.getSnapPoint(state.mouseX, state.mouseY);
+                        drawing.draw();
+                        if (snappedPoint.isSnapped) {
+                            snapping.drawSnapIndicator(snappedPoint.x, snappedPoint.y, snappedPoint.snapType);
+                        }
+                    }
+                },
+
+                handleMouseUp: function(e) {
+                    if (e.button !== 0) return;
+                    const { state, modification, events, historyManager } = CADApp;
+                    if (state.activeCommand === 'modifying') {
+                        const value = parseFloat(CADApp.ui.lengthInput.value);
+                        if (!isNaN(value) && value > 0) {
+                            const modType = (state.currentTool === 'fillet' && !state.isShiftPressed) || (state.currentTool === 'chamfer' && state.isShiftPressed) ? 'fillet' : 'chamfer';
+                            modification.applyModification(state.modificationTarget, value, modType);
+                            historyManager.saveState();
+                        }
+                        events.cancelCurrentCommand();
+                    }
+                    if(state.isDragging) {
+                        state.isDragging = false;
+                        historyManager.saveState();
+                    }
+                }
+            },
+
+            // --- Inicjalizacja aplikacji ---
+            init: function() {
+                this.ui.init();
+                this.ui.resizeCanvas();
+                this.events.setup();
+                this.ui.updateHistoryButtons();
+                this.ui.setActiveTool('select');
+            }
+        };
+
+        window.onload = () => CADApp.init();
+    </script>
+</body>
+</html> 
