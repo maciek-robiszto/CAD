@@ -1,0 +1,18 @@
+body {
+    font-family: 'Inter', sans-serif;
+    overflow: hidden;
+}
+#cad-canvas {
+    background-color: #f0f4f8;
+    border-radius: 0.5rem;
+}
+.tool-btn.active {
+    background-color: #3b82f6;
+    color: white;
+    border-color: #3b82f6;
+}
+input:disabled, button:disabled {
+    background-color: #e5e7eb;
+    cursor: not-allowed;
+    opacity: 0.7;
+}
