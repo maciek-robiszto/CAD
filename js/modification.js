@@ -39,6 +39,11 @@ CADApp.modification = {
                     const pCurr = points[vertexIndex];
                     const pNext = points[(vertexIndex + 1) % len];
 
+                    let existingDimension = null;
+                    if (pCurr.isFillet) {
+                        existingDimension = CADApp.state.shapes.find(s => s.type === 'dimension' && s.filletPoint === pCurr);
+                    }
+
                     // wektory do poprzedniego i następnego wierzchołka
                     const v1 = { x: pPrev.x - pCurr.x, y: pPrev.y - pCurr.y };
                     const v2 = { x: pNext.x - pCurr.x, y: pNext.y - pCurr.y };
@@ -90,35 +95,37 @@ CADApp.modification = {
                             p2: newP2
                         };
                         points.splice(vertexIndex, 1, filletPoint);
-                        
-                        // Automatycznie dodaj wymiar promienia filleta
-                        this.createFilletDimension(shape, filletPoint, actualRadius);
+
+                        // Automatycznie dodaj/aktualizuj wymiar promienia filleta
+                        this.createFilletDimension(shape, filletPoint, actualRadius, existingDimension);
                     }
                 },
-                
-                createFilletDimension: function(shape, filletPoint, radius) {
-                    // Utwórz wymiar promienia dla filleta
-                    const dimension = {
+                createFilletDimension: function(shape, filletPoint, radius, existingDimension) {
+                    // Utwórz lub zaktualizuj wymiar promienia dla filleta
+                    const dimension = existingDimension || {
                         type: 'dimension',
                         id: CADApp.state.shapeIdCounter++,
                         targetId: shape.id,
                         dimType: 'radius',
-                        offset: 0, // Kąt dla promienia
-                        text: `R ${radius.toFixed(1)}`,
-                        // Pozycje będą obliczone przez updateDimensionGeometry
-                        p1x: filletPoint.x,
-                        p1y: filletPoint.y,
-                        p2x: filletPoint.x + radius,
-                        p2y: filletPoint.y,
-                        extP1x: filletPoint.x,
-                        extP1y: filletPoint.y,
-                        extP2x: filletPoint.x + radius,
-                        extP2y: filletPoint.y,
-                        textX: filletPoint.x + radius / 2,
-                        textY: filletPoint.y - 10,
-                        filletPoint: filletPoint // Referencja do punktu fillet
+                        offset: 0 // Kąt dla promienia
                     };
-                    
-                    CADApp.state.shapes.push(dimension);
+
+                    dimension.text = `R ${radius.toFixed(1)}`;
+                    // Pozycje będą obliczone przez updateDimensionGeometry
+                    dimension.p1x = filletPoint.x;
+                    dimension.p1y = filletPoint.y;
+                    dimension.p2x = filletPoint.x + radius;
+                    dimension.p2y = filletPoint.y;
+                    dimension.extP1x = filletPoint.x;
+                    dimension.extP1y = filletPoint.y;
+                    dimension.extP2x = filletPoint.x + radius;
+                    dimension.extP2y = filletPoint.y;
+                    dimension.textX = filletPoint.x + radius / 2;
+                    dimension.textY = filletPoint.y - 10;
+                    dimension.filletPoint = filletPoint; // Referencja do punktu fillet
+
+                    if (!existingDimension) {
+                        CADApp.state.shapes.push(dimension);
+                    }
                 }
             };
